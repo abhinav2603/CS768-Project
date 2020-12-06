@@ -1,3 +1,0 @@
-[submodule "node2vec"]
-	path = node2vec
-	url = https://github.com/eliorc/node2vec
