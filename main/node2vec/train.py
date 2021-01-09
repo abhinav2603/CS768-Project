@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import networkx as nx
 import random
-from random import sample
+from random import sample, shuffle
 import copy
 import numpy as np 
 import scipy as sp
@@ -24,7 +24,8 @@ import argparse as arg
 import pickle
 import time
 # from sklearn.metrics import f1_score
-# from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression
+from sklearn import svm
 from collections import defaultdict
 np.random.seed(337)
 # !pip3 install tqdm
@@ -193,20 +194,58 @@ model.wv.save_word2vec_format(EMBEDDING_FILENAME)
 # Save model for later use
 model.save(EMBEDDING_MODEL_FILENAME)
 
+
+def edge_feature(u, v):
+	return u*v
+	return abs(u-v)
+
+
+train_list = graph.train_edges_list
+train_edges = [(x[0],x[1]) for x in train_list if x[2] == 1]
+train_non_edges = [(x[0],x[1]) for x in train_list if x[2] == 0]
+
+m = 16
+shuffle(train_edges)
+train_edges = train_edges[:len(train_edges)//m]
+shuffle(train_non_edges)
+train_non_edges = train_non_edges[:len(train_non_edges)//m]
+
+num_samples = len(train_edges)+len(train_non_edges)
+dim = len(model.wv[str(graph.vertex_list[0])])
+n = len(train_edges)
+print(dim, n)
+
+X_train = np.zeros((num_samples, dim))
+Y_train = np.zeros(num_samples)
+Y_train[:n] = 1
+
+X_train[:n,:] = np.array([edge_feature(np.array(model.wv[str(x)]), np.array(model.wv[str(y)])) for x,y in train_edges])
+X_train[n:,:] = np.array([edge_feature(np.array(model.wv[str(x)]), np.array(model.wv[str(y)])) for x,y in train_non_edges])
+
+# clf = LogisticRegression().fit(X_train, Y_train)
+# weights = clf.coef_
+
+# weights = np.matmul(np.matmul(X_train.T, X_train), np.matmul(X_train.T, Y_train.reshape(-1,1))).reshape(-1)
+
+svr = svm.SVR()
+svr.fit(X_train, Y_train)
+
+
 mean_ap,mrr=0,0
 num_nodes = 0
 for node in graph.vertex_list:
 
     if (node not in list(graph.G_test.nodes)) or (node not in list(graph.G_test_inv.nodes)):
         continue
-    print(node)
+    # print(node)
 
     #-------------------------------Get Pred-------------------------#
     lst = list(graph.G_test[node]) + list(graph.G_test_inv[node])
     # X_test = np.array([graphsage.sim(node,u).detach().numpy() for u in lst])
     # X_test = normalize(X_test)
-    emb_node = model.wv[str(node)]
-    preds = np.array([ np.dot(emb_node,np.array(model.wv[str(u)])) for u in lst])
+    emb_node = np.array(model.wv[str(node)])
+    # preds = np.array([np.dot(weights, edge_feature(emb_node, np.array(model.wv[str(u)]))) for u in lst])
+    preds = np.array([svr.predict(edge_feature(emb_node, np.array(model.wv[str(u)]))) for u in lst])
     # preds = zip(lst,list(clf.predict_proba(X_test)[:,1]))
     preds = zip(lst,preds)
     preds = [(node,u,p) for u,p in preds]
